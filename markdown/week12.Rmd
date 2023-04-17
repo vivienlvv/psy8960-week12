@@ -10,7 +10,63 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 # Script Settings and Resources
+```{r}
+# Importing relevant libraries 
+library(tidyverse)
+library(rvest)
+```
+
 # Data Import and Cleaning
+```{r}
+# Gathering required dataset from old reddit because it has a next page functionality
+io_html = read_html("https://old.reddit.com/r/IOPsychology/") 
+
+# 1. Need to find selector that gives the next link (need a counter too)
+# 2. Set User agent & build in sleeping function  
+
+df2 = read_html("https://old.reddit.com/r/IOPsychology/?count=50&after=t3_11zch69/")
+
+```
+
+```{r}
+get_response <- function(my_x, my_y) {
+  print(paste("x is now", my_x, "and y is now", my_y))
+  response <- GET("http://scraping.tntlab.org/add.php", 
+                  user_agent("UMN Student lee02903@umn.edu"),
+                              query = list(
+                              count = 25,
+                              after = "t3_12coq9u",
+                              format = "json"
+                              )
+  )
+  print(paste("Just received data from", response$url))
+  Sys.sleep(2)
+```
+
+
+```{r}
+## This I recycled from week 9 
+
+## Generating xpaths for the three variables
+xpath_post = "//div[contains(@class, 'odd') or contains(@class, 'even')]//a[contains(@class, 'title may-blank')]"
+xpath_upvotes = "//div[contains(@class, 'odd') or contains(@class, 'even')]//div[@class = 'score unvoted']"
+xpath_comments = "//div[contains(@class, 'odd') or contains(@class, 'even')]//div[@class = 'entry unvoted']//li[position() = 1]"
+
+## Creating vectors for constructing tibble later
+post = html_elements(df, xpath = xpath_post) %>% html_text()
+upvotes = html_elements(df, xpath = xpath_upvotes) %>% 
+  html_text() %>% 
+  as.numeric() # NA means hidden posts, which will be dropped by ggplot() and cor.test() automatically
+comments = html_elements(df, xpath = xpath_comments) %>% 
+  html_text() %>% 
+  str_replace_all(pattern = "^comment$", replacement = "0") %>% 
+  str_extract(pattern = "\\d+") %>% 
+  as.numeric() 
+
+## Creating required variable rstats_tbl 
+rstats_tbl = tibble(post, upvotes, comments)
+```
+
 # Visualization
 # Analysis
 # Publication

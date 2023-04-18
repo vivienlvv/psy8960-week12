@@ -4,7 +4,8 @@ library(httr)
 library(rvest)
 library(tictoc)
 
-responses_tbl = tibble() # Creating tibble to store response from get request
+## Creating tibble to store response from get request
+responses_tbl = tibble() 
 get_url = "https://old.reddit.com/r/IOPsychology/" # Initial get url
 counter = 1 
 

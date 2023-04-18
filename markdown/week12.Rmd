@@ -13,59 +13,69 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 # Importing relevant libraries 
 library(tidyverse)
+library(httr)
 library(rvest)
+library(tictoc)
 ```
 
 # Data Import and Cleaning
 ```{r}
-# Gathering required dataset from old reddit because it has a next page functionality
-io_html = read_html("https://old.reddit.com/r/IOPsychology/") 
+# Web Scraping from old IO Psychology subreddit 
 
-# 1. Need to find selector that gives the next link (need a counter too)
-# 2. Set User agent & build in sleeping function  
+## Creating tibble to store response from get request, setting initial URL and counter
+responses_tbl = tibble() 
+get_url = "https://old.reddit.com/r/IOPsychology/"
+counter = 1 
 
-df2 = read_html("https://old.reddit.com/r/IOPsychology/?count=50&after=t3_11zch69/")
+## This is a while-loop goes through all visible pages in the io subreddit 
+### I initially set it to 100 pages but ran into an error at page 40 because 
+### there are only 40 pages right now, so I set 40 for the while loop 
 
+while(counter <= 40){
+  response = content(GET(get_url, user_agent("UMN Student lee02903@umn.edu")), as = "text")
+  responses_tbl = bind_rows(responses_tbl, tibble(response)) # storing get response to tibble
+  # print(paste(counter, "Just received data from", get_url))
+  
+  next_url = read_html(response) %>% html_elements("span.next-button a") %>% html_attr("href")
+  get_url = next_url # Setting URL for next iteration
+  counter = counter + 1 # Incrementing counter for while loop
+  
+  Sys.sleep(2) # Pause to conform to rate limit
+}
 ```
 
 ```{r}
-get_response <- function(my_x, my_y) {
-  print(paste("x is now", my_x, "and y is now", my_y))
-  response <- GET("http://scraping.tntlab.org/add.php", 
-                  user_agent("UMN Student lee02903@umn.edu"),
-                              query = list(
-                              count = 25,
-                              after = "t3_12coq9u",
-                              format = "json"
-                              )
-  )
-  print(paste("Just received data from", response$url))
-  Sys.sleep(2)
+# Creating a function "get_info" that gets three things:
+# 1) post title, 2) num of upvotes for each page, and 3) time
+get_info = function(single_page){
+  single_page = read_html(single_page)
+  xpath_post = "//div[contains(@class, 'odd') or contains(@class, 'even')]//a[contains(@class, 'title may-blank')]"
+  xpath_upvotes = "//div[contains(@class, 'odd') or contains(@class, 'even')]//div[@class = 'score unvoted']"
+  
+  post = html_elements(single_page, xpath = xpath_post) %>% html_text()
+  upvotes = html_elements(single_page, xpath = xpath_upvotes) %>% 
+    html_text() %>% 
+    as.numeric() 
+  
+  # Added for myself  to see the post date
+  time =  html_elements(single_page, "time:nth-child(1)") %>% html_text() 
+  
+  io_tbl = tibble(time = time[-1], post, upvotes)
+  return(io_tbl)
+}
 ```
-
 
 ```{r}
-## This I recycled from week 9 
+# Outputting a list of posts containing a separate tibble for each page 
+posts_ls = lapply(responses_tbl$response, get_info)
 
-## Generating xpaths for the three variables
-xpath_post = "//div[contains(@class, 'odd') or contains(@class, 'even')]//a[contains(@class, 'title may-blank')]"
-xpath_upvotes = "//div[contains(@class, 'odd') or contains(@class, 'even')]//div[@class = 'score unvoted']"
-xpath_comments = "//div[contains(@class, 'odd') or contains(@class, 'even')]//div[@class = 'entry unvoted']//li[position() = 1]"
+# Collapsing all tibbles in the list to form one giant tibble
+week12_tbl =  bind_rows(posts_ls) %>% select(-time)
 
-## Creating vectors for constructing tibble later
-post = html_elements(df, xpath = xpath_post) %>% html_text()
-upvotes = html_elements(df, xpath = xpath_upvotes) %>% 
-  html_text() %>% 
-  as.numeric() # NA means hidden posts, which will be dropped by ggplot() and cor.test() automatically
-comments = html_elements(df, xpath = xpath_comments) %>% 
-  html_text() %>% 
-  str_replace_all(pattern = "^comment$", replacement = "0") %>% 
-  str_extract(pattern = "\\d+") %>% 
-  as.numeric() 
-
-## Creating required variable rstats_tbl 
-rstats_tbl = tibble(post, upvotes, comments)
+# Saving scraped dataset as week12_tbl.csv
+write_csv(week12_tbl, "../data/week12_tbl.csv")
 ```
+
 
 # Visualization
 # Analysis

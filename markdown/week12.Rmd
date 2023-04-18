@@ -19,6 +19,8 @@ library(tictoc)
 ```
 
 # Data Import and Cleaning
+
+### Data Creation through webscraping
 ```{r}
 # # Web Scraping from old IO Psychology subreddit 
 # 
@@ -76,9 +78,61 @@ library(tictoc)
 # write_csv(week12_tbl, "../data/week12_tbl.csv")
 ```
 
-```{r}
+```{r import, message= FALSE}
 # Importing saved data 
+week12_tbl = read_csv("../data/week12_tbl.csv")
+```
+\n
 
+### Creating text corpus using NLP
+```{r message = FALSE}
+library(tm)
+library(tidytext)
+library(qdap)
+```
+
+Create a new lemmatized pre-processed corpus from io_corpus_original called io_corpus by:
+
+1. removing references to IO Psychology (this is the topic of the reddit, so this isn’t useful – remember to also remove variations on this term and double-check your success in the data),
+2. completing any other beneficial pre-processing steps as appropriate to the dataset.
+(Be sure to explain in your comments why you chose the steps you chose and the order you chose for them.)
+```{r creating_corpus}
+# Creating a volatile corpus 
+## Getting dataframe with right colnames in the right order
+df_source = week12_tbl %>% 
+  mutate(doc_id = 1:nrow(week12_tbl)) %>%
+  rename(text = post) %>% 
+  select(doc_id, text)
+io_source = DataframeSource(df_source)
+io_corpus_original = VCorpus(io_source)
+```
+
+```{r}
+# Cleaning corpus 
+
+## Adding to contractions 
+extra = data.frame(contraction = str_replace_all(contractions$contraction, "'", "’"),
+                   expanded = contractions$expanded)
+contractions = rbind(contractions, extra)
+
+
+io_corpus = io_corpus_original %>%
+  # This first step is added because reddit apostrophes look weird and don't 
+  # match the one in the contractinos dictionary
+  tm_map(content_transformer(function(x) str_replace_all(x, pattern = "\\’", replacement = "\\'"))) %>%
+  tm_map(content_transformer(replace_abbreviation)) %>% 
+  tm_map(content_transformer(replace_contraction)) %>% 
+  tm_map(tolower) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(removeWords, c(stopwords("en"), "io psychology", "io", "io psych", "io psyc")) %>%
+  tm_map(stripWhitespace) %>%
+  tm_map(stemDocument, language = "english")
+```
+
+```{r}
+# Checking processing
+io_corpus_original$content[[565]]$content
+io_corpus$content[[565]]
 ```
 
 

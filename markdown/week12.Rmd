@@ -10,12 +10,21 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 # Script Settings and Resources
-```{r}
+```{r message = FALSE}
 # Importing relevant libraries 
 library(tidyverse)
 library(httr)
 library(rvest)
+
+library(tm)
+library(tidytext)
+library(qdap)
+
 library(RWeka)
+library(doParallel)
+
+library(topicmodels)
+library(wordcloud)
 ```
 
 # Data Import and Cleaning
@@ -85,12 +94,6 @@ week12_tbl = read_csv("../data/week12_tbl.csv")
 \n
 
 ### Creating text corpus using NLP
-```{r message = FALSE}
-library(tm)
-library(tidytext)
-library(qdap)
-library(topicmodels)
-```
 
 Create a new lemmatized pre-processed corpus from io_corpus_original called io_corpus by:
 
@@ -102,7 +105,7 @@ Create a new lemmatized pre-processed corpus from io_corpus_original called io_c
 io_corpus_original = VCorpus(VectorSource(week12_tbl$post))
 ```
 
-```{r}
+```{r cleaning_corpus}
 # Cleaning corpus 
 
 ## Creating custom stopword list 
@@ -134,10 +137,8 @@ io_corpus[[106]]$content
 # data.frame(text=unlist(sapply(io_corpus, `[`, "content")), stringsAsFactors=F) 
 ```
 
-7. Write a function called compare_them() that takes two corpora as input and displays one randomly selected row of content from each (e.g., if 251 was randomly selected, display the content of row 251 from both corpora). Then use this function to display the same row from both corpora you just created.
-Hint 1. 
-- You will probably want to run this function 10-20 times as a check to be sure your preprocessed corpus looks like you want it to look.
-```{r}
+### Creating function "compare_them" to compare individual post titles in the corpus before and after cleaning
+```{r compare_corpus}
 # Writing compare_them() function 
 ## input: io_corpus_original and io_corpus
 compare_them = function(corpus1, corpus2){
@@ -149,18 +150,15 @@ compare_them = function(corpus1, corpus2){
 }
 compare_them(io_corpus_original, io_corpus)
 ```
-## NEED TO REFINE CORPUS CLEANING PIPELINE!!!
+
+## NOTE!!! Need to change sparsity value after adding additional processing steps 
 
 
-8. Create a bigram DTM called io_dtm. Also create a version of this DTM with sparse terms eliminated called io_slim_dtm. Retain between a 2:1 and 3:1 N/k ratio in the slim DTM.
-- Hint 2. Aggressive or incorrect pre-processing can create a lot of mystery errors that are difficult to interpret. One common issue is that you may end up with empty entries in your corpus, e.g., if pre-processed cases end up containing zero text. If this happens, you can remove those cases using this code:
-tm_filter(corpus, FUN = function(x) { return(nchar(stripWhitespace(x$content)[[1]]) > 0) })
-However, be warned that this will make Step 11 below a bit more complicated than it would be otherwise. It may be easier/better to simply pre-process less aggressively.
-- Hint 3. Another common issue is that you do/do not use content_transformer() when you should not/should have done so. Be sure you understand what this function does.
 
-## Need to change sparsity value after adding additional processing steps 
+## Create Bigram document-term matrix 
 
-```{r}
+* I first created a function called "bigram_filter" to filter out empty posts and posts with less than 2 words because they won't have any bigram and their document-term matrix will just be zeroes. 
+```{r filter_posts}
 # Creating function to filter out empty posts and posts with less than 2 words (because won't have a term for bigram)
 ## This functinon KEEPS the posts we want
 ## I created this because when trying to use the FindTopicsNumber function, 
@@ -176,8 +174,8 @@ bigram_filter = function(x){
 post_retained = sapply(io_corpus, bigram_filter)
 ```
 
-
-```{r}
+* To create bigram document-term matrix, I first by built a cutsom tokenizer to get only bigrams. To reduce sparsity in the slim document-term matrix, I used the "removeSparseTerm()" function and set multiple sparsity values until I got one that was close to an n:k ratio that's close to 2:1 and 3:1 by dividing number of rows by the number of columns in the document-term matrix. 
+```{r create_dtm}
 # Creating Bigram DTM 
 
 ## Creating bigram tokenizer using Weka
@@ -197,15 +195,16 @@ io_slim_dtm = removeSparseTerms(io_dtm, sparse = 0.998)
 
 # Analysis
 
-
-9. Using good practices in topic modeling (and remember to explain everything clearly in comments), use latent Dirichlet allocation to categorize posts into topics from io_dtm. Create a tibble topics_tbl.
-- Include the following columns:
-1. doc_id, a document number identifier, which should match the one contained in io_corpus (i.e., it should reflect the original line number from your original input vector/data frame)
-2. original, the original post title
-3. topic, the topic number assigned by the LDA
-4. probability, the probability that document belongs to that topic
 ## Building topic models 
-```{r}
+
+## NEED TO COME BACK TO THIS- HAVEN'T ANSWERED To answer the following questions:
+Q1. Using the beta matrix alone, what topics would you conclude your final topic list maps onto? (e.g., topic 1, 2, 3…n each reflect what substantive topic construct? Use your best judgment.)
+
+Q2. Look at the original text of documents with the highest and lowest probabilities assigned to each document. Do your topic names derived from your interpretation of the beta matrix conceptually match with the content of the original posts? What kind of validity evidence does your answer to this question represent?
+
+#### Finding optimal number of topics 
+* Add reason why this number of topics (k) was picked
+```{r lda_number}
 # Finding optimal number of lda topics; adopted code from slide 25
 library(ldatuning)
 
@@ -228,7 +227,8 @@ stopCluster(local_cluster)
 registerDoSEQ()
 ```
 
-```{r}
+#### Fitting topic model with k = 
+```{r build_lda}
 # Actual fitting of LDA model 
 lda_results = LDA(io_dtm, 5)
 
@@ -237,11 +237,11 @@ lda_betas = tidy(lda_results, matrix = "beta")
 
 ## Posterior probabilities of documents about each topic
 lda_gammas = tidy(lda_results, matrix = "gamma")
-
 ```
 
+#### Creating required tibble "topics_tbl" 
 ```{r}
-# Creating required tibble 
+# Creating required tibble "topics_tbl"
 
 ## First getting only the posts used in DTM using the logical vector I defined
 ## above to track which posts were filtered out
@@ -260,12 +260,48 @@ topics_tbl = lda_gammas %>% group_by(document) %>%
   select(doc_id, original, topic, probability)
 ```
 
+## Step 11: create dataset called final_tbl
+```{r}
+upvotes_filtered = week12_tbl[topics_tbl$doc_id, "upvotes"]$upvotes
+
+final_tbl = topics_tbl %>% 
+  mutate(upvotes = upvotes_filtered,
+         topic = factor(topic, ordered = FALSE))
+```
+
+## Step 12: Running statistical analysis to determine if upvotes differs by topic (double check)
+```{r}
+# Anova (this)
+anova_mod = aov(upvotes ~ topic, data = final_tbl)
+summary(anova_mod)
+
+# # Chi square
+# chisq_tbl = final_tbl %>% group_by(topic) %>%
+#   summarize(avg_upvotes = mean(upvotes, na.rm = TRUE))# there was NA because one of the posts was very new and did not have any upvote
+```
+
+
+\n
+\n
+\n
+\n
+
 # Visualization
 
-# Publication
+## Creating a wordcloud of io_dtm
+* Based on the wordcloud below, we can see that
+```{r}
+m = as.matrix(io_dtm) 
+wordcloud(words = colnames((m)),
+          freq = colSums(m),
+          min.freq = 1, max.words = 75,
+          colors = c("#f29d35", "#f24b99"))
+```
 
-
-
+\n
+\n
+\n
+\n
 
 # Resources 
 * This section contains links or forums I consulted to solve rJava problem related to library "qdap" on a Macbook M1 machine

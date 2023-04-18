@@ -105,25 +105,33 @@ io_corpus_original = VCorpus(VectorSource(week12_tbl$post))
 ```{r}
 # Cleaning corpus 
 
+## Creating custom stopword list 
+io_stopwords = c("io psychology", "io", "io psych", "io psyc", "riopsychology")
+custom_stopwords = c(stopwords("en"), io_stopwords)
+
+## Begin actual cleaning
 io_corpus = io_corpus_original %>%
   # This step is added because reddit apostrophes look weird and don't 
   # match the one in the contractions dictionary
-  tm_map(content_transformer(str_replace_all), pattern = "\\’", replacement = "\\'") %>%
+  tm_map(content_transformer(str_replace_all), pattern = "’", replacement = "'") %>%
+  tm_map(content_transformer(str_replace_all), pattern = "—|“|”|‘", replacement = "") %>% 
   tm_map(content_transformer(replace_abbreviation)) %>% 
   tm_map(content_transformer(replace_contraction)) %>% 
   tm_map(content_transformer(str_to_lower)) %>%
   tm_map(removePunctuation) %>%
-  # tm_map(removeNumbers) %>%
-  tm_map(removeWords, c(stopwords("en"), "io psychology", "io", "io psych", "io psyc")) %>%
-  tm_map(stripWhitespace) %>%
-  tm_map(stemDocument, language = "english")
+  tm_map(removeNumbers) %>%
+  tm_map(removeWords, custom_stopwords) %>%
+  tm_map(stripWhitespace) %>% 
+  tm_map(content_transformer(trimws)) # removing leading and ending spaces
 ```
 
 ```{r}
 # Checking processing
-io_corpus_original[[1]]$content
-io_corpus[[1]]$content
+io_corpus_original[[106]]$content
+io_corpus[[106]]$content
 
+# Visualizing cleaned corpus in df
+# data.frame(text=unlist(sapply(io_corpus, `[`, "content")), stringsAsFactors=F) 
 ```
 
 7. Write a function called compare_them() that takes two corpora as input and displays one randomly selected row of content from each (e.g., if 251 was randomly selected, display the content of row 251 from both corpora). Then use this function to display the same row from both corpora you just created.
@@ -151,6 +159,24 @@ However, be warned that this will make Step 11 below a bit more complicated than
 - Hint 3. Another common issue is that you do/do not use content_transformer() when you should not/should have done so. Be sure you understand what this function does.
 
 ## Need to change sparsity value after adding additional processing steps 
+
+```{r}
+# Creating function to filter out empty posts and posts with less than 2 words (because won't have a term for bigram)
+## This functinon KEEPS the posts we want
+## I created this because when trying to use the FindTopicsNumber function, 
+## it threw an error saying some of my documents have 0 frequency across all bigrams which led me to build this function. I did not build this into my pre-processing pipeline because this would mess up the order of post for cleaned vs. original corpora.
+
+bigram_filter = function(x){
+  bool = nchar(stripWhitespace(x$content)[[1]]) > 0 & str_count((x$content)[[1]], "\\S+") >= 2
+  return(bool)
+}
+
+# This returns a logical vector showing whether they were filtered out which could 
+# be used for matching upvotes later
+post_retained = sapply(io_corpus, bigram_filter)
+```
+
+
 ```{r}
 # Creating Bigram DTM 
 
@@ -160,11 +186,12 @@ bigram_Tokenizer <- function(x) {
   }
 
 ## Creating bigram DTM 
-io_dtm = DocumentTermMatrix(io_corpus, 
-                            control=list(tokenize = bigram_Tokenizer)) 
+io_dtm = io_corpus %>% 
+  tm_filter(bigram_filter) %>% # removing empty posts and 
+  DocumentTermMatrix(control=list(tokenize = bigram_Tokenizer)) 
 
 # need to change after additional processing 
-io_slim_dtm = removeSparseTerms(io_dtm, sparse = 0.996) 
+io_slim_dtm = removeSparseTerms(io_dtm, sparse = 0.998) 
 ```
 
 
@@ -187,10 +214,12 @@ local_cluster = makeCluster(detectCores() - 1)
 registerDoParallel(local_cluster)
 
 ## Finding # of topics
-tuning = FindTopicsNumber(io_slim_dtm,
-                          topics = seq(2,10,1),
-                          metrics = c("Griffiths2004, CaoJuan2009,
-                                      Arun2010, Deveaud2014"),
+tuning = FindTopicsNumber(io_dtm,
+                          topics = seq(2,15,1),
+                           metrics = c("Griffiths2004",
+                                       "CaoJuan2009",
+                                       "Arun2010",
+                                       "Deveaud2014"),
                           verbose = TRUE)
 FindTopicsNumber_plot(tuning)
 
@@ -199,7 +228,37 @@ stopCluster(local_cluster)
 registerDoSEQ()
 ```
 
+```{r}
+# Actual fitting of LDA model 
+lda_results = LDA(io_dtm, 5)
 
+## Posterior probabilities representing the probability that a word belongs to a topic
+lda_betas = tidy(lda_results, matrix = "beta")
+
+## Posterior probabilities of documents about each topic
+lda_gammas = tidy(lda_results, matrix = "gamma")
+
+```
+
+```{r}
+# Creating required tibble 
+
+## First getting only the posts used in DTM using the logical vector I defined
+## above to track which posts were filtered out
+post_titles = week12_tbl %>% filter(post_retained) %>% 
+  pull(post)
+
+topics_tbl = lda_gammas %>% group_by(document) %>% 
+  top_n(1, gamma) %>%
+  slice(1) %>%
+  ungroup() %>% 
+  mutate(document = as.numeric(document)) %>% 
+  arrange(document) %>%
+  mutate(original = post_titles) %>% 
+  rename(doc_id = document, 
+         probability = gamma) %>% 
+  select(doc_id, original, topic, probability)
+```
 
 # Visualization
 

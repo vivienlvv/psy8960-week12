@@ -15,7 +15,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(httr)
 library(rvest)
-library(tictoc)
+library(RWeka)
 ```
 
 # Data Import and Cleaning
@@ -89,6 +89,7 @@ week12_tbl = read_csv("../data/week12_tbl.csv")
 library(tm)
 library(tidytext)
 library(qdap)
+library(topicmodels)
 ```
 
 Create a new lemmatized pre-processed corpus from io_corpus_original called io_corpus by:
@@ -98,32 +99,21 @@ Create a new lemmatized pre-processed corpus from io_corpus_original called io_c
 (Be sure to explain in your comments why you chose the steps you chose and the order you chose for them.)
 ```{r creating_corpus}
 # Creating a volatile corpus 
-## Getting dataframe with right colnames in the right order
-df_source = week12_tbl %>% 
-  mutate(doc_id = 1:nrow(week12_tbl)) %>%
-  rename(text = post) %>% 
-  select(doc_id, text)
-io_source = DataframeSource(df_source)
-io_corpus_original = VCorpus(io_source)
+io_corpus_original = VCorpus(VectorSource(week12_tbl$post))
 ```
 
 ```{r}
 # Cleaning corpus 
 
-## Adding to contractions 
-extra = data.frame(contraction = str_replace_all(contractions$contraction, "'", "’"),
-                   expanded = contractions$expanded)
-contractions = rbind(contractions, extra)
-
-
 io_corpus = io_corpus_original %>%
-  # This first step is added because reddit apostrophes look weird and don't 
-  # match the one in the contractinos dictionary
-  tm_map(content_transformer(function(x) str_replace_all(x, pattern = "\\’", replacement = "\\'"))) %>%
+  # This step is added because reddit apostrophes look weird and don't 
+  # match the one in the contractions dictionary
+  tm_map(content_transformer(str_replace_all), pattern = "\\’", replacement = "\\'") %>%
   tm_map(content_transformer(replace_abbreviation)) %>% 
   tm_map(content_transformer(replace_contraction)) %>% 
-  tm_map(tolower) %>%
+  tm_map(content_transformer(str_to_lower)) %>%
   tm_map(removePunctuation) %>%
+  # tm_map(removeNumbers) %>%
   tm_map(removeWords, c(stopwords("en"), "io psychology", "io", "io psych", "io psyc")) %>%
   tm_map(stripWhitespace) %>%
   tm_map(stemDocument, language = "english")
@@ -131,8 +121,9 @@ io_corpus = io_corpus_original %>%
 
 ```{r}
 # Checking processing
-io_corpus_original$content[[565]]$content
-io_corpus$content[[565]]
+io_corpus_original[[1]]$content
+io_corpus[[1]]$content
+
 ```
 
 7. Write a function called compare_them() that takes two corpora as input and displays one randomly selected row of content from each (e.g., if 251 was randomly selected, display the content of row 251 from both corpora). Then use this function to display the same row from both corpora you just created.
@@ -143,8 +134,8 @@ Hint 1.
 ## input: io_corpus_original and io_corpus
 compare_them = function(corpus1, corpus2){
   select_index = sample(1:length(io_corpus$content), 1)
-  original_row = corpus1$content[[select_index]]$content
-  cleaned_row = corpus2$content[[select_index]]
+  original_row = corpus1[[select_index]]$content
+  cleaned_row = corpus2[[select_index]]$content
   print(original_row)
   print(cleaned_row)
 }
@@ -153,7 +144,74 @@ compare_them(io_corpus_original, io_corpus)
 ## NEED TO REFINE CORPUS CLEANING PIPELINE!!!
 
 
+8. Create a bigram DTM called io_dtm. Also create a version of this DTM with sparse terms eliminated called io_slim_dtm. Retain between a 2:1 and 3:1 N/k ratio in the slim DTM.
+- Hint 2. Aggressive or incorrect pre-processing can create a lot of mystery errors that are difficult to interpret. One common issue is that you may end up with empty entries in your corpus, e.g., if pre-processed cases end up containing zero text. If this happens, you can remove those cases using this code:
+tm_filter(corpus, FUN = function(x) { return(nchar(stripWhitespace(x$content)[[1]]) > 0) })
+However, be warned that this will make Step 11 below a bit more complicated than it would be otherwise. It may be easier/better to simply pre-process less aggressively.
+- Hint 3. Another common issue is that you do/do not use content_transformer() when you should not/should have done so. Be sure you understand what this function does.
+
+## Need to change sparsity value after adding additional processing steps 
+```{r}
+# Creating Bigram DTM 
+
+## Creating bigram tokenizer using Weka
+bigram_Tokenizer <- function(x) { 
+  NGramTokenizer(x, Weka_control(min=2, max=2))
+  }
+
+## Creating bigram DTM 
+io_dtm = DocumentTermMatrix(io_corpus, 
+                            control=list(tokenize = bigram_Tokenizer)) 
+
+# need to change after additional processing 
+io_slim_dtm = removeSparseTerms(io_dtm, sparse = 0.996) 
+```
+
+
+# Analysis
+
+
+9. Using good practices in topic modeling (and remember to explain everything clearly in comments), use latent Dirichlet allocation to categorize posts into topics from io_dtm. Create a tibble topics_tbl.
+- Include the following columns:
+1. doc_id, a document number identifier, which should match the one contained in io_corpus (i.e., it should reflect the original line number from your original input vector/data frame)
+2. original, the original post title
+3. topic, the topic number assigned by the LDA
+4. probability, the probability that document belongs to that topic
+## Building topic models 
+```{r}
+# Finding optimal number of lda topics; adopted code from slide 25
+library(ldatuning)
+
+## Turning on parallelization
+local_cluster = makeCluster(detectCores() - 1)   
+registerDoParallel(local_cluster)
+
+## Finding # of topics
+tuning = FindTopicsNumber(io_slim_dtm,
+                          topics = seq(2,10,1),
+                          metrics = c("Griffiths2004, CaoJuan2009,
+                                      Arun2010, Deveaud2014"),
+                          verbose = TRUE)
+FindTopicsNumber_plot(tuning)
+
+## Turning off parallelization
+stopCluster(local_cluster)
+registerDoSEQ()
+```
+
+
 
 # Visualization
-# Analysis
+
 # Publication
+
+
+
+
+# Resources 
+* This section contains links or forums I consulted to solve rJava problem related to library "qdap" on a Macbook M1 machine
+```{r}
+# reference this: https://stackoverflow.com/questions/67849830/how-to-install-rjava-package-in-mac-with-m1-architecture
+#https://stackoverflow.com/questions/46513639/how-to-downgrade-java-from-9-to-8-on-a-macos-eclipse-is-not-running-with-java-9
+```
+

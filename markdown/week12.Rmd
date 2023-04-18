@@ -135,6 +135,24 @@ io_corpus_original$content[[565]]$content
 io_corpus$content[[565]]
 ```
 
+7. Write a function called compare_them() that takes two corpora as input and displays one randomly selected row of content from each (e.g., if 251 was randomly selected, display the content of row 251 from both corpora). Then use this function to display the same row from both corpora you just created.
+Hint 1. 
+- You will probably want to run this function 10-20 times as a check to be sure your preprocessed corpus looks like you want it to look.
+```{r}
+# Writing compare_them() function 
+## input: io_corpus_original and io_corpus
+compare_them = function(corpus1, corpus2){
+  select_index = sample(1:length(io_corpus$content), 1)
+  original_row = corpus1$content[[select_index]]$content
+  cleaned_row = corpus2$content[[select_index]]
+  print(original_row)
+  print(cleaned_row)
+}
+compare_them(io_corpus_original, io_corpus)
+```
+## NEED TO REFINE CORPUS CLEANING PIPELINE!!!
+
+
 
 # Visualization
 # Analysis

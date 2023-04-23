@@ -1,8 +1,10 @@
 ---
 title: "PSY8960 Week 12 NLP"
 author: "Vivien Lee"
-date: "2023-04-17"
-output: html_document
+date: "`r format(Sys.Date())`"
+output: 
+  html_document:
+    df_print: paged
 ---
 
 ```{r setup, include=FALSE}
@@ -19,9 +21,11 @@ library(rvest)
 library(tm)
 library(tidytext)
 library(qdap)
+library(textstem)
 
 library(RWeka)
 library(doParallel)
+library(ldatuning)
 
 library(topicmodels)
 library(wordcloud)
@@ -57,7 +61,8 @@ library(wordcloud)
 
 ```{r}
 # # Creating a function "get_info" that gets three things:
-# # 1) post title, 2) num of upvotes for each page, and 3) time
+# # 1) post title, 2) num of upvotes for each page, and 3) time, not required but added for me to check that I included at least posts from the past year
+
 # get_info = function(single_page){
 #   single_page = read_html(single_page)
 #   xpath_post = "//div[contains(@class, 'odd') or contains(@class, 'even')]//a[contains(@class, 'title may-blank')]"
@@ -87,19 +92,14 @@ library(wordcloud)
 # write_csv(week12_tbl, "../data/week12_tbl.csv")
 ```
 
+\n
+
+### Importing scraped data and creating text corpous using NLP
 ```{r import, message= FALSE}
 # Importing saved data 
 week12_tbl = read_csv("../data/week12_tbl.csv")
 ```
-\n
 
-### Creating text corpus using NLP
-
-Create a new lemmatized pre-processed corpus from io_corpus_original called io_corpus by:
-
-1. removing references to IO Psychology (this is the topic of the reddit, so this isn’t useful – remember to also remove variations on this term and double-check your success in the data),
-2. completing any other beneficial pre-processing steps as appropriate to the dataset.
-(Be sure to explain in your comments why you chose the steps you chose and the order you chose for them.)
 ```{r creating_corpus}
 # Creating a volatile corpus 
 io_corpus_original = VCorpus(VectorSource(week12_tbl$post))
@@ -107,17 +107,22 @@ io_corpus_original = VCorpus(VectorSource(week12_tbl$post))
 
 ```{r cleaning_corpus}
 # Cleaning corpus 
+## The choice of sequence of pre-processing steps depended on what each function does. For instance, replace_contraction only works on lower case text. Therefore, str_to_lower() was used before. 
 
-## Creating custom stopword list 
-io_stopwords = c("io psychology", "io", "io psych", "io psyc", "riopsychology")
+## Creating custom stopword list to remove words related to IO psychology and words like discussion and biweekly
+io_stopwords = c("io psychology", "io", "io psych", "io psyc",
+                 "riopsychology", "iopsychology", "psychology", "psychologist",
+                 "psych")
 custom_stopwords = c(stopwords("en"), io_stopwords)
 
 ## Begin actual cleaning
 io_corpus = io_corpus_original %>%
-  # This step is added because reddit apostrophes look weird and don't 
-  # match the one in the contractions dictionary
+  # Two steps are 
+  # This step is added because reddit apostrophes look weird and don't match the ones in the contractions dictionary
   tm_map(content_transformer(str_replace_all), pattern = "’", replacement = "'") %>%
-  tm_map(content_transformer(str_replace_all), pattern = "—|“|”|‘", replacement = "") %>% 
+  # This step is added because my DTM has terms with weird punctuations that were not accounted for by removePunctuation
+  tm_map(content_transformer(str_replace_all), pattern = "—|“|”|‘", replacement = "") %>%
+  # This step was performed to replace any abbreviations before converting text to lower case because the abbreviation library is case sensitive 
   tm_map(content_transformer(replace_abbreviation)) %>% 
   tm_map(content_transformer(replace_contraction)) %>% 
   tm_map(content_transformer(str_to_lower)) %>%
@@ -125,7 +130,10 @@ io_corpus = io_corpus_original %>%
   tm_map(removeNumbers) %>%
   tm_map(removeWords, custom_stopwords) %>%
   tm_map(stripWhitespace) %>% 
-  tm_map(content_transformer(trimws)) # removing leading and ending spaces
+  # This step is added to remove leading and ending spaces
+  tm_map(content_transformer(trimws)) %>% 
+  # This step is added because instructions require a "lemmatized" corpus
+  tm_map(content_transformer(lemmatize_strings))
 ```
 
 ```{r}
@@ -133,8 +141,13 @@ io_corpus = io_corpus_original %>%
 io_corpus_original[[106]]$content
 io_corpus[[106]]$content
 
+io_corpus_original[[229]]$content
+io_corpus[[229]]$content
+
+io_corpus_original[[402]]$content
+io_corpus[[402]]$content
 # Visualizing cleaned corpus in df
-# data.frame(text=unlist(sapply(io_corpus, `[`, "content")), stringsAsFactors=F) 
+# data.frame(text=unlist(sapply(io_corpus, `[`, "content")), stringsAsFactors=F) %>% view
 ```
 
 ### Creating function "compare_them" to compare individual post titles in the corpus before and after cleaning
@@ -145,19 +158,15 @@ compare_them = function(corpus1, corpus2){
   select_index = sample(1:length(io_corpus$content), 1)
   original_row = corpus1[[select_index]]$content
   cleaned_row = corpus2[[select_index]]$content
-  print(original_row)
-  print(cleaned_row)
+  return(data.frame(original_title = original_row,
+                   cleaned_title = cleaned_row))
 }
 compare_them(io_corpus_original, io_corpus)
 ```
 
-## NOTE!!! Need to change sparsity value after adding additional processing steps 
+### Create Bigram document-term matrix 
 
-
-
-## Create Bigram document-term matrix 
-
-* I first created a function called "bigram_filter" to filter out empty posts and posts with less than 2 words because they won't have any bigram and their document-term matrix will just be zeroes. 
+* I first created a function called "bigram_filter" to filter out empty posts because their corresponding row in the document-term matrix will just be zeroes. 
 ```{r filter_posts}
 # Creating function to filter out empty posts and posts with less than 2 words (because won't have a term for bigram)
 ## This functinon KEEPS the posts we want
@@ -165,7 +174,8 @@ compare_them(io_corpus_original, io_corpus)
 ## it threw an error saying some of my documents have 0 frequency across all bigrams which led me to build this function. I did not build this into my pre-processing pipeline because this would mess up the order of post for cleaned vs. original corpora.
 
 bigram_filter = function(x){
-  bool = nchar(stripWhitespace(x$content)[[1]]) > 0 & str_count((x$content)[[1]], "\\S+") >= 2
+  bool = nchar(stripWhitespace(x$content)[[1]]) > 0 
+  # & str_count((x$content)[[1]], "\\S+") >= 2
   return(bool)
 }
 
@@ -174,39 +184,39 @@ bigram_filter = function(x){
 post_retained = sapply(io_corpus, bigram_filter)
 ```
 
-* To create bigram document-term matrix, I first by built a cutsom tokenizer to get only bigrams. To reduce sparsity in the slim document-term matrix, I used the "removeSparseTerm()" function and set multiple sparsity values until I got one that was close to an n:k ratio that's close to 2:1 and 3:1 by dividing number of rows by the number of columns in the document-term matrix. 
+* To create bigram document-term matrix, I first by built a cutsom tokenizer to include only unigrams and bigrams. To reduce sparsity in the slim document-term matrix, I used the "removeSparseTerm()" function and set multiple sparsity values until I got one that was close to an n:k ratio that's close to 2:1 and 3:1 by dividing number of rows by the number of columns in the document-term matrix. 
 ```{r create_dtm}
 # Creating Bigram DTM 
 
 ## Creating bigram tokenizer using Weka
 bigram_Tokenizer <- function(x) { 
-  NGramTokenizer(x, Weka_control(min=2, max=2))
+  NGramTokenizer(x, Weka_control(min=1, max=2))
   }
 
 ## Creating bigram DTM 
 io_dtm = io_corpus %>% 
-  tm_filter(bigram_filter) %>% # removing empty posts and 
+  tm_filter(bigram_filter) %>% # removing empty posts, there are 3; so total doc number went from 978 to 975
   DocumentTermMatrix(control=list(tokenize = bigram_Tokenizer)) 
 
-# need to change after additional processing 
-io_slim_dtm = removeSparseTerms(io_dtm, sparse = 0.998) 
+# Setting sparse = 0.997, the n:k ratio is about 2.1:1
+io_slim_dtm = removeSparseTerms(io_dtm, sparse = 0.997) 
 ```
 
+\n 
+\n
+\n
 
 # Analysis
 
-## Building topic models 
+### Building topic models 
 
-## NEED TO COME BACK TO THIS- HAVEN'T ANSWERED To answer the following questions:
-Q1. Using the beta matrix alone, what topics would you conclude your final topic list maps onto? (e.g., topic 1, 2, 3…n each reflect what substantive topic construct? Use your best judgment.)
-
-Q2. Look at the original text of documents with the highest and lowest probabilities assigned to each document. Do your topic names derived from your interpretation of the beta matrix conceptually match with the content of the original posts? What kind of validity evidence does your answer to this question represent?
 
 #### Finding optimal number of topics 
-* Add reason why this number of topics (k) was picked
+
+* Based on the graph below,  k between 6 and 8 topics appear to strike a balance between all four metrics,  Griffiths (2004) and Deveaud (2014) are reasonably maximized, whereas Arun (2010) and Cao & Juan (2009) are reasonably minimized. Because k = yield more interpretable topic groupings, 
+I based the rest of my analyses and responses on a 9-topic model. 
 ```{r lda_number}
 # Finding optimal number of lda topics; adopted code from slide 25
-library(ldatuning)
 
 ## Turning on parallelization
 local_cluster = makeCluster(detectCores() - 1)   
@@ -214,11 +224,12 @@ registerDoParallel(local_cluster)
 
 ## Finding # of topics
 tuning = FindTopicsNumber(io_dtm,
-                          topics = seq(2,15,1),
-                           metrics = c("Griffiths2004",
+                          topics = seq(2, 20, 1),
+                          metrics = c("Griffiths2004",
                                        "CaoJuan2009",
                                        "Arun2010",
                                        "Deveaud2014"),
+                          control = list(seed = 2023),
                           verbose = TRUE)
 FindTopicsNumber_plot(tuning)
 
@@ -227,10 +238,11 @@ stopCluster(local_cluster)
 registerDoSEQ()
 ```
 
-#### Fitting topic model with k = 
+#### Fitting topic model with k = 10
 ```{r build_lda}
 # Actual fitting of LDA model 
-lda_results = LDA(io_dtm, 5)
+lda_results = LDA(io_dtm, 6,
+                  control = list(seed = 2023))
 
 ## Posterior probabilities representing the probability that a word belongs to a topic
 lda_betas = tidy(lda_results, matrix = "beta")
@@ -239,8 +251,51 @@ lda_betas = tidy(lda_results, matrix = "beta")
 lda_gammas = tidy(lda_results, matrix = "gamma")
 ```
 
-#### Creating required tibble "topics_tbl" 
+
+#### Exploring the beta matrix 
+
+Q1. Using the beta matrix alone, what topics would you conclude your final topic list maps onto? (e.g., topic 1, 2, 3…n each reflect what substantive topic construct? Use your best judgment.)
+\n 
+
+* In response to question 1, based on the terms that have the highest posterior probabilities of representing the probability that a word belongs to a topic. I think each of my 10 topics will map onto the following concepts. However, there is significant overlap between topics in terms of content, e.g., topic 3 "miscellaneous questions about IO Psychology" virtually overlaps with all other topics. 
+
+\n 
+
+1) Master's degree specific questions \n
+2) Asking for career-related help (e.g., whether one should get an IO master's and advice for working in people analytics) \n
+3) Miscellaneous questions about IO Psychology (e.g., the role of AI/ML in IO and book recommendations) \n
+4) IO Psychology jobs (e.g., availability of consulting jobs in IO and asking for raises/ promotions) \n
+5) Research, conferences (e.g., SIOP), and questions about IO PhDs \n
+6) Thoughts and discussions on IO-related topics (e.g., "what have you been reading and what do you think of it?") \n
+
+
 ```{r}
+lda_betas %>%
+  group_by(topic) %>% 
+  top_n(10, beta) %>% 
+  arrange(topic, -beta) 
+
+topic_names = data.frame(topic = 1:6,
+                          assigned_topic_names = c("Master's degree specific questions",
+                                                   "Asking for career-related help",
+                                                   "Miscellaneous questions about IO Psychology",
+                                                   "IO Psychology Jobs",
+                                                   "Research, conferences, and questions relaed to IO PhDs",
+                                                   "Thoughts and discussions on IO-related topics"))
+```
+
+
+#### Creating required tibble "topics_tbl" 
+
+Q2. Look at the original text of documents with the highest and lowest probabilities assigned to each document. Do your topic names derived from your interpretation of the beta matrix conceptually match with the content of the original posts? What kind of validity evidence does your answer to this question represent?
+
+\n
+* Based on the output below, we can see that topic names derived from my interpretation of the beta matrix conceptually match with the content of the original posts to some degree but not perfectly. For example, document 11 "IO or HRM masters?" is correctly mapped onto topic 1 " master's degree specific questions" but document 18 "Harvard business review" is incorrectly mapped onto topic 1 when it should have been classified into topics 3 or 5. 
+
+\n
+
+* My answer to this question represents content validity in that each topic (construct) grouping is determined based on the post titles.   
+```{r topics_tbl}
 # Creating required tibble "topics_tbl"
 
 ## First getting only the posts used in DTM using the logical vector I defined
@@ -257,29 +312,28 @@ topics_tbl = lda_gammas %>% group_by(document) %>%
   mutate(original = post_titles) %>% 
   rename(doc_id = document, 
          probability = gamma) %>% 
-  select(doc_id, original, topic, probability)
+  select(doc_id, original, topic, probability) # %>% 
+ # left_join(topic_names, by = "topic") # this is for me to look at topic groupings more easily 
+topics_tbl 
 ```
 
-## Step 11: create dataset called final_tbl
-```{r}
+
+```{r final_tbl}
+# Creating required tibble "final_tbl"
 upvotes_filtered = week12_tbl[topics_tbl$doc_id, "upvotes"]$upvotes
 
 final_tbl = topics_tbl %>% 
   mutate(upvotes = upvotes_filtered,
          topic = factor(topic, ordered = FALSE))
+final_tbl
 ```
-
-## Step 12: Running statistical analysis to determine if upvotes differs by topic (double check)
-```{r}
-# Anova (this)
+* To determine whether upvotes differ by topic, I ran an anova with topic number as the grouping variable and number of upvotes as the dependent variable. Results show that the group means for the number of upvotes across topics did not significantly differ from each other, *F* = 1.661 and *p* = 0.15 > 0.05. 
+```{r upvotes_by_topic}
+# Running statistical analysis to determine if upvotes differs by topic
+## Anova (this)
 anova_mod = aov(upvotes ~ topic, data = final_tbl)
-summary(anova_mod)
-
-# # Chi square
-# chisq_tbl = final_tbl %>% group_by(topic) %>%
-#   summarize(avg_upvotes = mean(upvotes, na.rm = TRUE))# there was NA because one of the posts was very new and did not have any upvote
+summary(anova_mod) # 1 observation dropped due to missingness because the post was too early and upvote number was hidden with a dot at the time of scraping
 ```
-
 
 \n
 \n
@@ -289,12 +343,13 @@ summary(anova_mod)
 # Visualization
 
 ## Creating a wordcloud of io_dtm
-* Based on the wordcloud below, we can see that
+* Based on the wordcloud below, we can see the most frequent terms occurring in all of reddit posts from the IO subreddit, terms such as "master", "research", "career", "work", "job", "read", and "think" are most common, indicating that a big portion of the reddit posts are about these topics/ actions. 
 ```{r}
 m = as.matrix(io_dtm) 
 wordcloud(words = colnames((m)),
           freq = colSums(m),
-          min.freq = 1, max.words = 75,
+          min.freq = 1, max.words = 50,
+         # scale=c(0.5, 1.5),
           colors = c("#f29d35", "#f24b99"))
 ```
 
@@ -304,7 +359,7 @@ wordcloud(words = colnames((m)),
 \n
 
 # Resources 
-* This section contains links or forums I consulted to solve rJava problem related to library "qdap" on a Macbook M1 machine
+* This section contains links or forums I consulted to solve rJava problem related to library "qdap" on a Macbook M1 
 ```{r}
 # reference this: https://stackoverflow.com/questions/67849830/how-to-install-rjava-package-in-mac-with-m1-architecture
 #https://stackoverflow.com/questions/46513639/how-to-downgrade-java-from-9-to-8-on-a-macos-eclipse-is-not-running-with-java-9

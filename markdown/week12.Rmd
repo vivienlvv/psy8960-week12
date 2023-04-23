@@ -5,14 +5,17 @@ date: "`r format(Sys.Date())`"
 output: 
   html_document:
     df_print: paged
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(inputFile, encoding = encoding, output_dir = "../out/")
+  })    
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 ```
 
 # Script Settings and Resources
-```{r message = FALSE}
+```{r}
 # Importing relevant libraries 
 library(tidyverse)
 library(httr)
@@ -30,11 +33,12 @@ library(ldatuning)
 library(topicmodels)
 library(wordcloud)
 ```
+\
 
 # Data Import and Cleaning
 
 ### Data Creation through webscraping
-```{r}
+```{r echo = FALSE}
 # # Web Scraping from old IO Psychology subreddit 
 # 
 # ## Creating tibble to store response from get request, setting initial URL and counter
@@ -59,7 +63,7 @@ library(wordcloud)
 # }
 ```
 
-```{r}
+```{r echo = FALSE}
 # # Creating a function "get_info" that gets three things:
 # # 1) post title, 2) num of upvotes for each page, and 3) time, not required but added for me to check that I included at least posts from the past year
 
@@ -81,7 +85,7 @@ library(wordcloud)
 # }
 ```
 
-```{r}
+```{r echo = FALSE}
 # # Outputting a list of posts containing a separate tibble for each page
 # posts_ls = lapply(responses_tbl$response, get_info)
 # 
@@ -94,12 +98,13 @@ library(wordcloud)
 
 \n
 
-### Importing scraped data and creating text corpous using NLP
-```{r import, message= FALSE}
+### Importing scraped data 
+```{r import}
 # Importing saved data 
 week12_tbl = read_csv("../data/week12_tbl.csv")
 ```
 
+### Creating and Cleaning Text Corpus using NLP
 ```{r creating_corpus}
 # Creating a volatile corpus 
 io_corpus_original = VCorpus(VectorSource(week12_tbl$post))
@@ -136,21 +141,15 @@ io_corpus = io_corpus_original %>%
   tm_map(content_transformer(lemmatize_strings))
 ```
 
-```{r}
+```{r echo = FALSE}
 # Checking processing
-io_corpus_original[[106]]$content
-io_corpus[[106]]$content
-
-io_corpus_original[[229]]$content
-io_corpus[[229]]$content
-
-io_corpus_original[[402]]$content
-io_corpus[[402]]$content
+# io_corpus_original[[106]]$content
+# io_corpus[[106]]$content
 # Visualizing cleaned corpus in df
 # data.frame(text=unlist(sapply(io_corpus, `[`, "content")), stringsAsFactors=F) %>% view
 ```
 
-### Creating function "compare_them" to compare individual post titles in the corpus before and after cleaning
+#### Creating function "compare_them" to compare individual post titles in the corpus before and after cleaning
 ```{r compare_corpus}
 # Writing compare_them() function 
 ## input: io_corpus_original and io_corpus
@@ -167,8 +166,12 @@ compare_them(io_corpus_original, io_corpus)
 ### Create Bigram document-term matrix 
 
 * I first created a function called "bigram_filter" to filter out empty posts because their corresponding row in the document-term matrix will just be zeroes. 
+
+\n
+* To create bigram document-term matrix, I first by built a cutsom tokenizer to include only unigrams and bigrams. To reduce sparsity in the slim document-term matrix, I used the "removeSparseTerm()" function and set multiple sparsity values until I got one that was close to an n:k ratio that's close to 2:1 and 3:1 by dividing number of rows by the number of columns in the document-term matrix. 
+
 ```{r filter_posts}
-# Creating function to filter out empty posts and posts with less than 2 words (because won't have a term for bigram)
+
 ## This functinon KEEPS the posts we want
 ## I created this because when trying to use the FindTopicsNumber function, 
 ## it threw an error saying some of my documents have 0 frequency across all bigrams which led me to build this function. I did not build this into my pre-processing pipeline because this would mess up the order of post for cleaned vs. original corpora.
@@ -184,7 +187,7 @@ bigram_filter = function(x){
 post_retained = sapply(io_corpus, bigram_filter)
 ```
 
-* To create bigram document-term matrix, I first by built a cutsom tokenizer to include only unigrams and bigrams. To reduce sparsity in the slim document-term matrix, I used the "removeSparseTerm()" function and set multiple sparsity values until I got one that was close to an n:k ratio that's close to 2:1 and 3:1 by dividing number of rows by the number of columns in the document-term matrix. 
+
 ```{r create_dtm}
 # Creating Bigram DTM 
 
@@ -202,19 +205,15 @@ io_dtm = io_corpus %>%
 io_slim_dtm = removeSparseTerms(io_dtm, sparse = 0.997) 
 ```
 
-\n 
-\n
-\n
+\
 
 # Analysis
 
 ### Building topic models 
 
+#### 1. Finding optimal number of topics 
 
-#### Finding optimal number of topics 
-
-* Based on the graph below,  k between 6 and 8 topics appear to strike a balance between all four metrics,  Griffiths (2004) and Deveaud (2014) are reasonably maximized, whereas Arun (2010) and Cao & Juan (2009) are reasonably minimized. Because k = yield more interpretable topic groupings, 
-I based the rest of my analyses and responses on a 9-topic model. 
+* Based on the graph below,  k between 6 and 8 topics appear to strike a balance between all four metrics,  Griffiths (2004) and Deveaud (2014) are reasonably maximized, whereas Arun (2010) and Cao & Juan (2009) are reasonably minimized. Because k = 6 yielded more interpretable topic groupings, I based the rest of my analyses and responses on a 9-topic model. 
 ```{r lda_number}
 # Finding optimal number of lda topics; adopted code from slide 25
 
@@ -238,7 +237,7 @@ stopCluster(local_cluster)
 registerDoSEQ()
 ```
 
-#### Fitting topic model with k = 10
+#### 2. Fitting topic model with k = 6
 ```{r build_lda}
 # Actual fitting of LDA model 
 lda_results = LDA(io_dtm, 6,
@@ -252,15 +251,14 @@ lda_gammas = tidy(lda_results, matrix = "gamma")
 ```
 
 
-#### Exploring the beta matrix 
+#### 3. Exploring the beta matrix 
 
 Q1. Using the beta matrix alone, what topics would you conclude your final topic list maps onto? (e.g., topic 1, 2, 3…n each reflect what substantive topic construct? Use your best judgment.)
 \n 
 
-* In response to question 1, based on the terms that have the highest posterior probabilities of representing the probability that a word belongs to a topic. I think each of my 10 topics will map onto the following concepts. However, there is significant overlap between topics in terms of content, e.g., topic 3 "miscellaneous questions about IO Psychology" virtually overlaps with all other topics. 
+* In response to question 1, based on the terms that have the highest posterior probabilities of representing the probability that a word belongs to a topic. I think each of my 6 topics will map onto the following concepts. However, there is a decent amount of content overlap between topics in terms of content, e.g., topic 3 "miscellaneous questions about IO Psychology" virtually overlaps with all other topics. 
 
 \n 
-
 1) Master's degree specific questions \n
 2) Asking for career-related help (e.g., whether one should get an IO master's and advice for working in people analytics) \n
 3) Miscellaneous questions about IO Psychology (e.g., the role of AI/ML in IO and book recommendations) \n
@@ -270,6 +268,7 @@ Q1. Using the beta matrix alone, what topics would you conclude your final topic
 
 
 ```{r}
+# Building beta matrix to visualize the top 10 terms associated with each topic
 lda_betas %>%
   group_by(topic) %>% 
   top_n(10, beta) %>% 
@@ -285,7 +284,7 @@ topic_names = data.frame(topic = 1:6,
 ```
 
 
-#### Creating required tibble "topics_tbl" 
+#### 4. Creating required tibble "topics_tbl" 
 
 Q2. Look at the original text of documents with the highest and lowest probabilities assigned to each document. Do your topic names derived from your interpretation of the beta matrix conceptually match with the content of the original posts? What kind of validity evidence does your answer to this question represent?
 
@@ -294,7 +293,7 @@ Q2. Look at the original text of documents with the highest and lowest probabili
 
 \n
 
-* My answer to this question represents content validity in that each topic (construct) grouping is determined based on the post titles.   
+* My answer to this question represents content validity in that each topic (construct) grouping is determined based on the content of the post titles.   
 ```{r topics_tbl}
 # Creating required tibble "topics_tbl"
 
@@ -317,6 +316,7 @@ topics_tbl = lda_gammas %>% group_by(document) %>%
 topics_tbl 
 ```
 
+#### 5. Creating required tibble "final_tbl" 
 
 ```{r final_tbl}
 # Creating required tibble "final_tbl"
@@ -327,6 +327,9 @@ final_tbl = topics_tbl %>%
          topic = factor(topic, ordered = FALSE))
 final_tbl
 ```
+
+#### 6. Analyzing the relationship between upvotes and topic number
+
 * To determine whether upvotes differ by topic, I ran an anova with topic number as the grouping variable and number of upvotes as the dependent variable. Results show that the group means for the number of upvotes across topics did not significantly differ from each other, *F* = 1.661 and *p* = 0.15 > 0.05. 
 ```{r upvotes_by_topic}
 # Running statistical analysis to determine if upvotes differs by topic
@@ -335,10 +338,7 @@ anova_mod = aov(upvotes ~ topic, data = final_tbl)
 summary(anova_mod) # 1 observation dropped due to missingness because the post was too early and upvote number was hidden with a dot at the time of scraping
 ```
 
-\n
-\n
-\n
-\n
+\
 
 # Visualization
 

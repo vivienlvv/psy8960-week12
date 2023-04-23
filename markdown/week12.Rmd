@@ -34,7 +34,7 @@ library(topicmodels)
 library(wordcloud)
 ```
 \
-
+ 
 # Data Import and Cleaning
 
 ### Data Creation through webscraping
@@ -141,13 +141,6 @@ io_corpus = io_corpus_original %>%
   tm_map(content_transformer(lemmatize_strings))
 ```
 
-```{r echo = FALSE}
-# Checking processing
-# io_corpus_original[[106]]$content
-# io_corpus[[106]]$content
-# Visualizing cleaned corpus in df
-# data.frame(text=unlist(sapply(io_corpus, `[`, "content")), stringsAsFactors=F) %>% view
-```
 
 #### Creating function "compare_them" to compare individual post titles in the corpus before and after cleaning
 ```{r compare_corpus}
@@ -163,12 +156,10 @@ compare_them = function(corpus1, corpus2){
 compare_them(io_corpus_original, io_corpus)
 ```
 
+
 ### Create Bigram document-term matrix 
 
-* I first created a function called "bigram_filter" to filter out empty posts because their corresponding row in the document-term matrix will just be zeroes. 
-
-\n
-* To create bigram document-term matrix, I first by built a cutsom tokenizer to include only unigrams and bigrams. To reduce sparsity in the slim document-term matrix, I used the "removeSparseTerm()" function and set multiple sparsity values until I got one that was close to an n:k ratio that's close to 2:1 and 3:1 by dividing number of rows by the number of columns in the document-term matrix. 
+* I first created a function called "bigram_filter" to filter out empty posts because their corresponding row in the document-term matrix will just be zeroes. Then, to create bigram document-term matrix, I  built a cutsom tokenizer to include only unigrams and bigrams. To reduce sparsity in the slim document-term matrix, I used the "removeSparseTerm()" function and set multiple sparsity values until I got one that was close to an n:k ratio that's close to 2:1 and 3:1 by dividing number of rows by the number of columns in the document-term matrix. 
 
 ```{r filter_posts}
 
@@ -213,7 +204,8 @@ io_slim_dtm = removeSparseTerms(io_dtm, sparse = 0.997)
 
 #### 1. Finding optimal number of topics 
 
-* Based on the graph below,  k between 6 and 8 topics appear to strike a balance between all four metrics,  Griffiths (2004) and Deveaud (2014) are reasonably maximized, whereas Arun (2010) and Cao & Juan (2009) are reasonably minimized. Because k = 6 yielded more interpretable topic groupings, I based the rest of my analyses and responses on a 9-topic model. 
+* Based on the graph below,  k between 6 and 8 topics appear to strike a balance between all four metrics,  Griffiths (2004) and Deveaud (2014) are reasonably maximized, whereas Arun (2010) and Cao & Juan (2009) are reasonably minimized. Because k = 6 yielded more interpretable topic groupings, therefore, I based the rest of my analyses and responses on a 6-topic model. I also set seed for reproducibility.
+
 ```{r lda_number}
 # Finding optimal number of lda topics; adopted code from slide 25
 

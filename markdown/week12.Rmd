@@ -1,5 +1,5 @@
 ---
-title: "PSY8960 Week 12 NLP"
+title: "PSY8960 Week 12 Natural Language Processing"
 author: "Vivien Lee"
 date: "`r format(Sys.Date())`"
 output: 
@@ -117,7 +117,7 @@ io_corpus_original = VCorpus(VectorSource(week12_tbl$post))
 ## Creating custom stopword list to remove words related to IO psychology and words like discussion and biweekly
 io_stopwords = c("io psychology", "io", "io psych", "io psyc",
                  "riopsychology", "iopsychology", "psychology", "psychologist",
-                 "psych")
+                 "psychologists", "psych")
 custom_stopwords = c(stopwords("en"), io_stopwords)
 
 ## Begin actual cleaning
@@ -159,14 +159,11 @@ compare_them(io_corpus_original, io_corpus)
 
 ### Create Bigram document-term matrix 
 
-* I first created a function called "bigram_filter" to filter out empty posts because their corresponding row in the document-term matrix will just be zeroes. Then, to create bigram document-term matrix, I  built a cutsom tokenizer to include only unigrams and bigrams. To reduce sparsity in the slim document-term matrix, I used the "removeSparseTerm()" function and set multiple sparsity values until I got one that was close to an n:k ratio that's close to 2:1 and 3:1 by dividing number of rows by the number of columns in the document-term matrix. 
+* I first created a function called "bigram_filter" to filter out empty posts because their corresponding row in the document-term matrix will just be zeroes. I did not build this into my pre-processing pipeline because this would mess up the order of post titles for cleaned vs. original corpora. Then, to create bigram document-term matrix, I  built a cutsom tokenizer to include only unigrams and bigrams. To reduce sparsity in the slim document-term matrix, I used the "removeSparseTerm()" function and set multiple sparsity values until I got one that was close to an n:k ratio that's close to 2:1 and 3:1 by dividing number of rows by the number of columns in the document-term matrix. 
 
 ```{r filter_posts}
 
 ## This functinon KEEPS the posts we want
-## I created this because when trying to use the FindTopicsNumber function, 
-## it threw an error saying some of my documents have 0 frequency across all bigrams which led me to build this function. I did not build this into my pre-processing pipeline because this would mess up the order of post for cleaned vs. original corpora.
-
 bigram_filter = function(x){
   bool = nchar(stripWhitespace(x$content)[[1]]) > 0 
   # & str_count((x$content)[[1]], "\\S+") >= 2
@@ -204,7 +201,7 @@ io_slim_dtm = removeSparseTerms(io_dtm, sparse = 0.997)
 
 #### 1. Finding optimal number of topics 
 
-* Based on the graph below,  k between 6 and 8 topics appear to strike a balance between all four metrics,  Griffiths (2004) and Deveaud (2014) are reasonably maximized, whereas Arun (2010) and Cao & Juan (2009) are reasonably minimized. Because k = 6 yielded more interpretable topic groupings, therefore, I based the rest of my analyses and responses on a 6-topic model. I also set seed for reproducibility.
+* Based on the graph below,  k between 9 and 12 topics appear to strike a balance between all four metrics,  Griffiths (2004) and Deveaud (2014) are reasonably maximized, whereas Arun (2010) and Cao & Juan (2009) are reasonably minimized. Because k = 10 yielded more interpretable and more manageable number of topic groupings, I based the rest of my analyses and responses on a 10-topic model. I also set seed for reproducibility. Note that I started with a minimum of 2 topics but the optimal number of topics (between 5-8) was still too broad and did not properly reflect the content of the post titles, so I started with 5 topics in the subsequent iterations.  
 
 ```{r lda_number}
 # Finding optimal number of lda topics; adopted code from slide 25
@@ -215,7 +212,7 @@ registerDoParallel(local_cluster)
 
 ## Finding # of topics
 tuning = FindTopicsNumber(io_dtm,
-                          topics = seq(2, 20, 1),
+                          topics = seq(5, 20, 1),
                           metrics = c("Griffiths2004",
                                        "CaoJuan2009",
                                        "Arun2010",
@@ -229,10 +226,10 @@ stopCluster(local_cluster)
 registerDoSEQ()
 ```
 
-#### 2. Fitting topic model with k = 6
+#### 2. Fitting topic model with k = 10
 ```{r build_lda}
 # Actual fitting of LDA model 
-lda_results = LDA(io_dtm, 6,
+lda_results = LDA(io_dtm, 10,
                   control = list(seed = 2023))
 
 ## Posterior probabilities representing the probability that a word belongs to a topic
@@ -248,44 +245,57 @@ lda_gammas = tidy(lda_results, matrix = "gamma")
 Q1. Using the beta matrix alone, what topics would you conclude your final topic list maps onto? (e.g., topic 1, 2, 3…n each reflect what substantive topic construct? Use your best judgment.)
 \n 
 
-* In response to question 1, based on the terms that have the highest posterior probabilities of representing the probability that a word belongs to a topic. I think each of my 6 topics will map onto the following concepts. However, there is a decent amount of content overlap between topics in terms of content, e.g., topic 3 "miscellaneous questions about IO Psychology" virtually overlaps with all other topics. 
+* In response to question 1, based on the terms that have the highest posterior probabilities of representing the probability that a word belongs to a topic. I think each of my 6 topics will map onto the following concepts. However, there is a decent amount of content overlap between topics in terms of content, e.g., topic 3 "miscellaneous questions about IO Psychology" virtually overlaps with all other topics.  
 
-\n 
-1) Master's degree specific questions \n
-2) Asking for career-related help (e.g., whether one should get an IO master's and advice for working in people analytics) \n
-3) Miscellaneous questions about IO Psychology (e.g., the role of AI/ML in IO and book recommendations) \n
-4) IO Psychology jobs (e.g., availability of consulting jobs in IO and asking for raises/ promotions) \n
-5) Research, conferences (e.g., SIOP), and questions about IO PhDs \n
-6) Thoughts and discussions on IO-related topics (e.g., "what have you been reading and what do you think of it?") \n
+1) Employee/job applicant experience (i.e., assessments and interviews)  
+
+2) Early career development, e.g., internships and graduate program selection  
+
+3) Training, learning, and skill development  
+
+4) Recommendations on career development, e.g., graduate program selection and potential career paths  
+
+5) Specific inquiries about master's programs, work, and career oportunities  
+
+6) Readings, thoughts, and discussions on different topics in IO Psychology  
+
+7) Questions on different lines of research literature  
+
+8) Journal articles and knowledge  
+
+9) Tools and careers in IO Psychology (e.g., job analysis and people analytics)  
+
+10) Research & Conference (e.g., SIOP) 
 
 
 ```{r}
-# Building beta matrix to visualize the top 10 terms associated with each topic
+# Building beta matrix to visualize the top 20 terms associated with each topic
 lda_betas %>%
   group_by(topic) %>% 
-  top_n(10, beta) %>% 
+  top_n(20, beta) %>% 
   arrange(topic, -beta) 
 
-topic_names = data.frame(topic = 1:6,
-                          assigned_topic_names = c("Master's degree specific questions",
-                                                   "Asking for career-related help",
-                                                   "Miscellaneous questions about IO Psychology",
-                                                   "IO Psychology Jobs",
-                                                   "Research, conferences, and questions relaed to IO PhDs",
-                                                   "Thoughts and discussions on IO-related topics"))
+topic_names = data.frame(topic = 1:10,
+                          assigned_topic_names = c("Employee/job applicant experience",
+                                                   "Early career development",
+                                                   "Training, learning, and skill development",
+                                                   "Recommendations on career development",
+                                                   "Specific inquiries about master's programs",
+                                                   "Readings, thoughts, and discussions on different topics",
+                                                   "Questions on different lines of research literature",
+                                                   "Journal articles and knowledge ",
+                                                   "Tools and careers in IO Psychology",
+                                                   "Research & Conference"))
 ```
 
 
 #### 4. Creating required tibble "topics_tbl" 
 
-Q2. Look at the original text of documents with the highest and lowest probabilities assigned to each document. Do your topic names derived from your interpretation of the beta matrix conceptually match with the content of the original posts? What kind of validity evidence does your answer to this question represent?
+Q2. Look at the original text of documents with the highest and lowest probabilities assigned to each document. Do your topic names derived from your interpretation of the beta matrix conceptually match with the content of the original posts? What kind of validity evidence does your answer to this question represent?  
 
-\n
-* Based on the output below, we can see that topic names derived from my interpretation of the beta matrix conceptually match with the content of the original posts to some degree but not perfectly. For example, document 11 "IO or HRM masters?" is correctly mapped onto topic 1 " master's degree specific questions" but document 18 "Harvard business review" is incorrectly mapped onto topic 1 when it should have been classified into topics 3 or 5. 
+* Based on the output below, we can see that topic names derived from my interpretation of the beta matrix conceptually match with the content of the original posts to some degree but not perfectly, especially for topics with lower probability of belonging to the assigned topic. For example, document 739 "Undergrad Internships" is correctly assigned to topic 2 "Early career development", whereas document 737 "What's the difference between Industrial & Organizational Psychology and Organizational Psychology" is incorrectly mapped onto topic 1 "Employee/ job applicant experience", which would have been better described by topic 6 "Readings, thoughts, and discussions on different topics".  
 
-\n
-
-* My answer to this question represents content validity in that each topic (construct) grouping is determined based on the content of the post titles.   
+* My answer to this question represents content validity in that each topic (construct) grouping is determined based on the content of the post titles. This is also related to construct validity, because some of the topics overlap with each other (e.g., topic 2 early career development and topic 5 about master's program), there is likely construct overlap and construct contamination. Therefore, I think the content validity and construct validity of these topic constructs are lacking.
 ```{r topics_tbl}
 # Creating required tibble "topics_tbl"
 
@@ -304,7 +314,9 @@ topics_tbl = lda_gammas %>% group_by(document) %>%
   rename(doc_id = document, 
          probability = gamma) %>% 
   select(doc_id, original, topic, probability) # %>% 
- # left_join(topic_names, by = "topic") # this is for me to look at topic groupings more easily 
+  # group_by(topic) %>% 
+  # arrange(-probability)  # %>% 
+  # left_join(topic_namses, by = "topic") # this is for me to look at topic groupings more easily 
 topics_tbl 
 ```
 
@@ -322,7 +334,7 @@ final_tbl
 
 #### 6. Analyzing the relationship between upvotes and topic number
 
-* To determine whether upvotes differ by topic, I ran an anova with topic number as the grouping variable and number of upvotes as the dependent variable. Results show that the group means for the number of upvotes across topics did not significantly differ from each other, *F* = 1.661 and *p* = 0.15 > 0.05. 
+* To determine whether upvotes differ by topic, I ran an anova with topic number as the grouping variable and number of upvotes as the dependent variable. Results show that the group means for the number of upvotes across topics did not significantly differ from each other, *F* = 1.048 and *p* = 0.399 > 0.05. 
 ```{r upvotes_by_topic}
 # Running statistical analysis to determine if upvotes differs by topic
 ## Anova (this)
@@ -334,8 +346,9 @@ summary(anova_mod) # 1 observation dropped due to missingness because the post w
 
 # Visualization
 
-## Creating a wordcloud of io_dtm
-* Based on the wordcloud below, we can see the most frequent terms occurring in all of reddit posts from the IO subreddit, terms such as "master", "research", "career", "work", "job", "read", and "think" are most common, indicating that a big portion of the reddit posts are about these topics/ actions. 
+#### Creating a wordcloud of io_dtm
+
+* Based on the wordcloud below, we can see the most frequent terms occurring in all of reddit posts from the IO subreddit, terms such as "master", "research", "career", "job", "read", and "think" are most common, indicating that a big portion of the reddit posts are about these topics/ actions. 
 ```{r}
 m = as.matrix(io_dtm) 
 wordcloud(words = colnames((m)),
@@ -344,12 +357,8 @@ wordcloud(words = colnames((m)),
          # scale=c(0.5, 1.5),
           colors = c("#f29d35", "#f24b99"))
 ```
-
-\n
-\n
-\n
-\n
-
+  
+  
 # Resources 
 * This section contains links or forums I consulted to solve rJava problem related to library "qdap" on a Macbook M1 
 ```{r}
